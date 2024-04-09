@@ -2,6 +2,7 @@ package freeLockCache
 
 import (
 	"context"
+	"github.com/allegro/bigcache/v3"
 	"github.com/stretchr/testify/assert"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ func TestCache_Get(t *testing.T) {
 	cache, err := New(&Config{
 		Enable:     true,
 		DataLoader: &loader,
+		Config:     bigcache.DefaultConfig(10 * time.Minute),
 	})
 	assert.Nil(t, err)
 

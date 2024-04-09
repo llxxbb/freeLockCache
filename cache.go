@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"sync"
-	"time"
 )
 
 type Cache struct {
@@ -127,6 +126,6 @@ func New(cfg *Config) (*Cache, error) {
 		keyLock: sync.Mutex{},
 	}
 	var err error
-	c.bc, err = bigcache.New(context.Background(), bigcache.DefaultConfig(10*time.Minute))
+	c.bc, err = bigcache.New(context.Background(), cfg.Config)
 	return &c, err
 }
