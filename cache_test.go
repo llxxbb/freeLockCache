@@ -50,3 +50,30 @@ func TestCache_Get(t *testing.T) {
 	group.Wait()
 	assert.Equal(t, int32(1), loader.cnt)
 }
+
+func TestCache_GetNoCache(t *testing.T) {
+	loader := MyLoader{}
+	cache, err := New(&Config{
+		Enable:     false,
+		DataLoader: &loader,
+		Config:     bigcache.DefaultConfig(10 * time.Minute),
+	})
+	assert.Nil(t, err)
+
+	ctx := context.Background()
+	apps := []string{"1", "2", "3"}
+	group := sync.WaitGroup{}
+	for i := 0; i < 100; i++ {
+		group.Add(1)
+		go func() {
+			group.Done()
+			get, err := cache.Get(ctx, apps)
+			assert.Nil(t, err)
+			assert.Equal(t, []byte("a"), get["1"])
+			assert.Equal(t, []byte("b"), get["2"])
+			assert.Equal(t, []byte("c"), get["3"])
+		}()
+	}
+	group.Wait()
+	assert.Equal(t, int32(100), loader.cnt)
+}
