@@ -2,125 +2,101 @@ package freeLockCache
 
 import (
 	"context"
-	"errors"
 	"github.com/allegro/bigcache/v3"
-	"go.uber.org/zap"
-	"golang.org/x/exp/maps"
+	"github.com/goccy/go-json"
 	"sync"
 )
 
-type Cache struct {
-	*Config
+type Cache[K comparable, V any] struct {
+	*Config[K, V]
 	locks   map[string]*sync.Mutex
 	keyLock sync.Mutex
 	bc      *bigcache.BigCache
 }
 
 // Get GetDN 获取App对应的域名
-func (c *Cache) Get(ctx context.Context, keys []string) (map[string][]byte, error) {
+func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, error) {
 	// check
-	keyNum := len(keys)
-	if keyNum == 0 {
-		return nil, nil
-	}
-
+	var rtn V
 	if !c.Enable {
 		// load data directly
-		return c.Load(ctx, keys)
+		return c.Load(ctx, key)
 	}
-	// get from cache
-	rtn, noCache := c.getFromCache(keys)
-	noCacheLen := len(noCache)
-	if noCacheLen == 0 {
+	// convert key
+	keyB, err := json.Marshal(key)
+	if err != nil {
+		return rtn, err
+	}
+	keyS := string(keyB)
+	if keyS == "" {
 		return rtn, nil
 	}
 
-	// load data
-	err := c.loadWithLock(ctx, keys)
-	if err != nil {
-		return nil, err
+	// get from cache
+	rtn, err = c.getFromCache(keyS)
+	if err == nil {
+		return rtn, nil
 	}
 
-	// get rest
-	rtn2, noCache := c.getFromCache(noCache)
-	// append rtn2 to rtn
-	for k, v := range rtn2 {
-		rtn[k] = v
-	}
-
-	// check, because cache loading may cause error
-	if len(rtn) < keyNum {
-		msg := "cache item missed"
-		zap.L().Error(msg)
-		return nil, errors.New(msg)
-	}
-
-	return rtn, nil
+	// load data and return
+	return c.loadWithLock(ctx, keyS, key)
 }
 
-func (c *Cache) loadWithLock(ctx context.Context, keys []string) error {
-	key := keys[0]
+func (c *Cache[K, V]) loadWithLock(ctx context.Context, keyS string, key K) (V, error) {
 	c.keyLock.Lock()
-	mLock, ok := c.locks[key]
+	mLock, ok := c.locks[keyS]
 	if ok {
+		// 等待从外部加载到缓存完
 		mLock.Lock()
+		// 加载完成后释放键上的锁
 		mLock.Unlock()
-		// 等完后不需要做任何事
-		return nil
+		// 返回缓存数据
+		return c.getFromCache(keyS)
 	}
 	// 创建锁，防止并发处理 keyLock.Unlock() 后面的逻辑
 	oneLock := sync.Mutex{}
 	oneLock.Lock()
 	defer oneLock.Unlock()
-	c.locks[key] = &oneLock
-
+	c.locks[keyS] = &oneLock
 	c.keyLock.Unlock()
 
 	// 加载数据--------------------------------------
 	// 加载完成后删除锁
-	defer delete(c.locks, key)
+	defer delete(c.locks, keyS)
 
-	err := c.loadToCache(ctx, keys)
-	return err
+	return c.loadToCache(ctx, keyS, key)
 }
 
-func (c *Cache) loadToCache(ctx context.Context, keys []string) error {
+func (c *Cache[K, V]) loadToCache(ctx context.Context, keyS string, key K) (V, error) {
 	// get appInfo
-	dn, err := c.Load(ctx, keys)
+	rtn, err := c.Load(ctx, key)
 	if err != nil {
-		return err
+		return rtn, err
 	}
 
 	// set to catch and result
-	for k, v := range dn {
-		err := c.bc.Set(k, v)
-		if err != nil {
-			zap.Error(err)
-			return err
-		}
+	v, err := serialize(rtn)
+	err = c.bc.Set(keyS, v)
+	if err != nil {
+		return rtn, err
 	}
-	return nil
+	return rtn, nil
 }
 
-// 从缓存中获取域名信息，返回已缓存的和未
-func (c *Cache) getFromCache(keys []string) (map[string][]byte, []string) {
-	rtn := make(map[string][]byte)
-	noCache := make(map[string]struct{})
-
-	// get from cache
-	for _, k := range keys {
-		s, err := c.bc.Get(k)
-		if err == nil {
-			rtn[k] = s
-		} else {
-			noCache[k] = struct{}{}
-		}
+// 从缓存中获取域名信息，返回已缓存的和未, 如果未缓存则返回 error
+func (c *Cache[K, V]) getFromCache(key string) (V, error) {
+	var rtn V
+	// get from cache, no cache then get error
+	s, err := c.bc.Get(key)
+	if err != nil {
+		return rtn, err
 	}
-	return rtn, maps.Keys(noCache)
+	err = deserialize(s, &rtn)
+	return rtn, err
 }
 
-func New(cfg *Config) (*Cache, error) {
-	c := Cache{
+func New[K comparable, V any](cfg *Config[K, V]) (*Cache[K, V], error) {
+	c := Cache[K, V]{
 		Config:  cfg,
 		locks:   make(map[string]*sync.Mutex),
 		keyLock: sync.Mutex{},

@@ -5,11 +5,8 @@ import (
 	"github.com/allegro/bigcache/v3"
 )
 
-type Config struct {
+type Config[K comparable, V any] struct {
 	Enable bool
-	DataLoader
+	Load   func(ctx context.Context, key K) (V, error)
 	bigcache.Config
-}
-type DataLoader interface {
-	Load(ctx context.Context, keys []string) (map[string][]byte, error)
 }
