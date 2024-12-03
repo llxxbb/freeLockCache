@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/allegro/bigcache/v3 v3.1.0
 	github.com/goccy/go-json v0.10.3 // fast json, replace the "encoding/json"
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 )
 
 require (
